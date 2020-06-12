@@ -66,11 +66,11 @@ public class SQLiteIndexTest {
     };
 
     public static List<Car> data = Arrays.asList(
-            new Car(1, "Ford", "Focus", Car.Color.BLUE, 5, 9000.50, Arrays.asList("abs", "gps")),
-            new Car(2, "Honda", "Civic", Car.Color.RED, 5, 5000.00, Arrays.asList("airbags")),
-            new Car(3, "Toyota", "Prius", Car.Color.BLACK, 3, 9700.00, Arrays.asList("abs")),
-            new Car(4, "Fiat", "Panda", Car.Color.BLUE, 5, 5600.00, Collections.<String>emptyList()),
-            new Car(5, "Fiat", "Punto", Car.Color.BLUE, 5, 5600.00, Arrays.asList("gps"))
+            new Car(1, "Ford", "Focus", Car.Color.BLUE, 5, 9000.50, Arrays.asList("abs", "gps"), Collections.emptyList()),
+            new Car(2, "Honda", "Civic", Car.Color.RED, 5, 5000.00, Arrays.asList("airbags"), Collections.emptyList()),
+            new Car(3, "Toyota", "Prius", Car.Color.BLACK, 3, 9700.00, Arrays.asList("abs"), Collections.emptyList()),
+            new Car(4, "Fiat", "Panda", Car.Color.BLUE, 5, 5600.00, Collections.<String>emptyList(), Collections.emptyList()),
+            new Car(5, "Fiat", "Punto", Car.Color.BLUE, 5, 5600.00, Arrays.asList("gps"), Collections.emptyList())
     );
 
     @Rule
@@ -137,8 +137,8 @@ public class SQLiteIndexTest {
 
         // The objects to add
         Set<Car> removedObjects = new HashSet<Car>(2);
-        removedObjects.add(new Car(1, "Ford", "Focus", Car.Color.BLUE, 5, 9000.50, Arrays.asList("abs", "gps")));
-        removedObjects.add(new Car(2, "Honda", "Civic", Car.Color.RED, 5, 5000.00, Arrays.asList("airbags")));
+        removedObjects.add(new Car(1, "Ford", "Focus", Car.Color.BLUE, 5, 9000.50, Arrays.asList("abs", "gps"), Collections.emptyList()));
+        removedObjects.add(new Car(2, "Honda", "Civic", Car.Color.RED, 5, 5000.00, Arrays.asList("airbags"), Collections.emptyList()));
 
         @SuppressWarnings({"unchecked", "unused"})
         SQLiteIndex<String, Car, Integer> carFeaturesOffHeapIndex = new SQLiteIndex<String, Car, Integer>(
@@ -179,8 +179,8 @@ public class SQLiteIndexTest {
         when(preparedStatement.executeBatch()).thenReturn(new int[] {2});
         // The objects to add
         Set<Car> addedObjects = new HashSet<Car>(2);
-        addedObjects.add(new Car(1, "Ford", "Focus", Car.Color.BLUE, 5, 9000.50, Arrays.asList("abs", "gps")));
-        addedObjects.add(new Car(2, "Honda", "Civic", Car.Color.RED, 5, 5000.00, Arrays.asList("airbags")));
+        addedObjects.add(new Car(1, "Ford", "Focus", Car.Color.BLUE, 5, 9000.50, Arrays.asList("abs", "gps"), Collections.emptyList()));
+        addedObjects.add(new Car(2, "Honda", "Civic", Car.Color.RED, 5, 5000.00, Arrays.asList("airbags"), Collections.emptyList()));
 
         // Create the index and cal the addAll
         SQLiteIndex<String, Car, Integer> carFeaturesOffHeapIndex = new SQLiteIndex<String, Car, Integer>(
@@ -278,7 +278,7 @@ public class SQLiteIndexTest {
 
         Assert.assertEquals(carFeaturesOffHeapIndex.pragmaSynchronous, SQLiteConfig.SynchronousMode.FULL);
         Assert.assertEquals(carFeaturesOffHeapIndex.pragmaJournalMode, SQLiteConfig.JournalMode.DELETE);
-        Assert.assertTrue(carFeaturesOffHeapIndex.canSuspendSyncAndJournaling);
+        Assert.assertTrue(carFeaturesOffHeapIndex.canModifySyncAndJournaling);
 
     }
 
@@ -315,8 +315,8 @@ public class SQLiteIndexTest {
 
         // The objects to add
         Set<Car> initWithObjects = new HashSet<Car>(2);
-        initWithObjects.add(new Car(1, "Ford", "Focus", Car.Color.BLUE, 5, 9000.50, Arrays.asList("abs", "gps")));
-        initWithObjects.add(new Car(2, "Honda", "Civic", Car.Color.RED, 5, 5000.00, Arrays.asList("airbags")));
+        initWithObjects.add(new Car(1, "Ford", "Focus", Car.Color.BLUE, 5, 9000.50, Arrays.asList("abs", "gps"), Collections.emptyList()));
+        initWithObjects.add(new Car(2, "Honda", "Civic", Car.Color.RED, 5, 5000.00, Arrays.asList("airbags"), Collections.emptyList()));
 
         SQLiteIndex<String, Car, Integer> carFeaturesOffHeapIndex = new SQLiteIndex<String, Car, Integer>(
                 Car.FEATURES,
@@ -368,8 +368,8 @@ public class SQLiteIndexTest {
 
         // The objects to add
         Set<Car> initWithObjects = new HashSet<Car>(2);
-        initWithObjects.add(new Car(1, "Ford", "Focus", Car.Color.BLUE, 5, 9000.50, Arrays.asList("abs", "gps")));
-        initWithObjects.add(new Car(2, "Honda", "Civic", Car.Color.RED, 5, 5000.00, Arrays.asList("airbags")));
+        initWithObjects.add(new Car(1, "Ford", "Focus", Car.Color.BLUE, 5, 9000.50, Arrays.asList("abs", "gps"), Collections.emptyList()));
+        initWithObjects.add(new Car(2, "Honda", "Civic", Car.Color.RED, 5, 5000.00, Arrays.asList("airbags"), Collections.emptyList()));
 
         SQLiteIndex<String, Car, Integer> carFeaturesOffHeapIndex = new SQLiteIndex<String, Car, Integer>(
                 Car.FEATURES,
@@ -385,7 +385,7 @@ public class SQLiteIndexTest {
         verify(statement, times(1)).executeQuery("PRAGMA synchronous;");
         verify(statement, times(1)).executeUpdate("CREATE TABLE IF NOT EXISTS " + TABLE_NAME + " (objectKey INTEGER, value TEXT, PRIMARY KEY (objectKey, value)) WITHOUT ROWID;");
         verify(statement, times(1)).executeUpdate("CREATE INDEX IF NOT EXISTS " + INDEX_NAME + " ON " + TABLE_NAME + " (value);");
-        verify(statement, times(5)).close();
+        verify(statement, times(6)).close();
 
         verify(preparedStatement, times(2)).setObject(1, 1);
         verify(preparedStatement, times(1)).setObject(1, 2);
@@ -400,7 +400,7 @@ public class SQLiteIndexTest {
 
         Assert.assertEquals(carFeaturesOffHeapIndex.pragmaSynchronous, SQLiteConfig.SynchronousMode.FULL);
         Assert.assertEquals(carFeaturesOffHeapIndex.pragmaJournalMode, SQLiteConfig.JournalMode.DELETE);
-        Assert.assertTrue(carFeaturesOffHeapIndex.canSuspendSyncAndJournaling);
+        Assert.assertTrue(carFeaturesOffHeapIndex.canModifySyncAndJournaling);
     }
 
     @Test

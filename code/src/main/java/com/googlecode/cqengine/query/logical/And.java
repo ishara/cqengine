@@ -30,14 +30,11 @@ import java.util.Iterator;
  */
 public class And<O> extends LogicalQuery<O> {
 
-    private final Collection<Query<O>> childQueries;
-
     public And(Collection<Query<O>> childQueries) {
         super(childQueries);
         if (this.size() < 2) {
             throw new IllegalStateException("An 'And' query cannot have fewer than 2 child queries, " + childQueries.size() + " were supplied");
         }
-        this.childQueries = childQueries;
     }
 
     /**
@@ -46,6 +43,9 @@ public class And<O> extends LogicalQuery<O> {
      */
     @Override
     public boolean matches(O object, QueryOptions queryOptions) {
+        if (super.hasComparativeQueries()) {
+            throw new UnsupportedOperationException("This method is not supported on logical queries which encapsulate comparative queries");
+        }
         for (Query<O> query : super.getSimpleQueries()) {
             if (!query.matches(object, queryOptions)) {
                 return false;

@@ -19,6 +19,8 @@ import com.googlecode.cqengine.attribute.Attribute;
 import com.googlecode.cqengine.attribute.SimpleAttribute;
 import com.googlecode.cqengine.query.option.QueryOptions;
 
+import static com.googlecode.cqengine.query.support.QueryValidation.checkQueryValueNotNull;
+
 /**
  * Asserts than an attribute is between a lower and an upper bound.
 
@@ -26,7 +28,6 @@ import com.googlecode.cqengine.query.option.QueryOptions;
  */
 public class Between<O, A extends Comparable<A>> extends SimpleQuery<O, A> {
 
-    private final Attribute<O, A> attribute;
     private final A lowerValue;
     private final boolean lowerInclusive;
     private final A upperValue;
@@ -34,10 +35,9 @@ public class Between<O, A extends Comparable<A>> extends SimpleQuery<O, A> {
 
     public Between(Attribute<O, A> attribute, A lowerValue, boolean lowerInclusive, A upperValue, boolean upperInclusive) {
         super(attribute);
-        this.attribute = attribute;
-        this.lowerValue = lowerValue;
+        this.lowerValue = checkQueryValueNotNull(lowerValue);
         this.lowerInclusive = lowerInclusive;
-        this.upperValue = upperValue;
+        this.upperValue = checkQueryValueNotNull(upperValue);
         this.upperInclusive = upperInclusive;
     }
 

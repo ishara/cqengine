@@ -34,6 +34,7 @@ import com.googlecode.cqengine.persistence.support.ObjectSet;
 import com.googlecode.cqengine.persistence.support.ObjectStore;
 import com.googlecode.cqengine.persistence.support.ObjectStoreResultSet;
 import com.googlecode.cqengine.persistence.support.sqlite.SQLiteObjectStore;
+import com.googlecode.cqengine.query.ComparativeQuery;
 import com.googlecode.cqengine.query.Query;
 import com.googlecode.cqengine.query.logical.And;
 import com.googlecode.cqengine.query.logical.LogicalQuery;
@@ -94,8 +95,8 @@ public class CollectionQueryEngine<O> implements QueryEngineInternal<O> {
     private final ConcurrentMap<Query<O>, Index<O>> standingQueryIndexes = new ConcurrentHashMap<Query<O>, Index<O>>();
     // Fallback index (handles queries which other indexes don't support)...
     private final FallbackIndex<O> fallbackIndex = new FallbackIndex<O>();
-    // Initially true, updated as indexes are added in addIndex()...
-    private volatile boolean allIndexesAreMutable = true;
+    // Updated as indexes are added or removed, this is used by the isMutable() method...
+    private final Set<Index<O>> immutableIndexes = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
     public CollectionQueryEngine() {
     }
@@ -125,6 +126,16 @@ public class CollectionQueryEngine<O> implements QueryEngineInternal<O> {
         });
     }
 
+    /**
+     * This is a no-op here, as currently the {@link ModificationListener#destroy(QueryOptions)} method
+     * is only used by indexes.
+     * @param queryOptions Optional parameters for the update
+     */
+    @Override
+    public void destroy(QueryOptions queryOptions) {
+        // No-op
+    }
+
     // -------------------- Methods for adding indexes --------------------
 
     /**
@@ -133,20 +144,17 @@ public class CollectionQueryEngine<O> implements QueryEngineInternal<O> {
     @Override
     public void addIndex(Index<O> index, QueryOptions queryOptions) {
         if (index instanceof StandingQueryIndex) {
-            allIndexesAreMutable = allIndexesAreMutable && index.isMutable();
             @SuppressWarnings({"unchecked"})
             StandingQueryIndex<O> standingQueryIndex = (StandingQueryIndex<O>) index;
             addStandingQueryIndex(standingQueryIndex, standingQueryIndex.getStandingQuery(), queryOptions);
         }
         else if (index instanceof CompoundIndex) {
-            allIndexesAreMutable = allIndexesAreMutable && index.isMutable();
             @SuppressWarnings({"unchecked"})
             CompoundIndex<O> compoundIndex = (CompoundIndex<O>) index;
             CompoundAttribute<O> compoundAttribute = compoundIndex.getAttribute();
             addCompoundIndex(compoundIndex, compoundAttribute, queryOptions);
         }
         else if (index instanceof AttributeIndex) {
-            allIndexesAreMutable = allIndexesAreMutable && index.isMutable();
             @SuppressWarnings({"unchecked"})
             AttributeIndex<?, O> attributeIndex = (AttributeIndex<?, O>) index;
             Attribute<O, ?> indexedAttribute = attributeIndex.getAttribute();
@@ -162,6 +170,9 @@ public class CollectionQueryEngine<O> implements QueryEngineInternal<O> {
         }
         else {
             throw new IllegalStateException("Unexpected type of index: " + (index == null ? null : index.getClass().getName()));
+        }
+        if (!index.isMutable()) {
+            immutableIndexes.add(index);
         }
     }
 
@@ -181,7 +192,7 @@ public class CollectionQueryEngine<O> implements QueryEngineInternal<O> {
             // Ensure there is not already an identity index added for this attribute...
             for (Index<O> existingIndex : indexesOnThisAttribute) {
                 if (existingIndex instanceof IdentityAttributeIndex) {
-                    throw new IllegalStateException("An identity index for persistence has already been added, and no additional non-heap indexes are allowed, on attribute: " + attribute);
+                    throw new IllegalStateException("An index has already been added on the primary key attribute used for persistence, and no additional non-heap indexes are allowed on that attribute: " + attribute);
                 }
             }
         }
@@ -229,6 +240,68 @@ public class CollectionQueryEngine<O> implements QueryEngineInternal<O> {
         queryOptions.put(Persistence.class, persistence);
         compoundIndex.init(objectStore, queryOptions);
     }
+
+    // -------------------- Methods for removing indexes --------------------
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void removeIndex(Index<O> index, QueryOptions queryOptions) {
+        boolean removed;
+        if (index instanceof StandingQueryIndex) {
+            @SuppressWarnings({"unchecked"})
+            StandingQueryIndex<O> standingQueryIndex = (StandingQueryIndex<O>) index;
+
+            removed = standingQueryIndexes.remove(standingQueryIndex.getStandingQuery(), standingQueryIndex);
+        }
+        else if (index instanceof CompoundIndex) {
+            @SuppressWarnings({"unchecked"})
+            CompoundIndex<O> compoundIndex = (CompoundIndex<O>) index;
+            CompoundAttribute<O> compoundAttribute = compoundIndex.getAttribute();
+
+            removed = compoundIndexes.remove(compoundAttribute, compoundIndex);
+        }
+        else if (index instanceof AttributeIndex) {
+            @SuppressWarnings({"unchecked"})
+            AttributeIndex<?, O> attributeIndex = (AttributeIndex<?, O>) index;
+            Attribute<O, ?> indexedAttribute = attributeIndex.getAttribute();
+
+            if (indexedAttribute instanceof StandingQueryAttribute) {
+                @SuppressWarnings("unchecked")
+                StandingQueryAttribute<O> standingQueryAttribute = (StandingQueryAttribute<O>) indexedAttribute;
+                Query<O> standingQuery = standingQueryAttribute.getQuery();
+
+                removed = standingQueryIndexes.remove(standingQuery, index);
+            }
+            else {
+                Set<Index<O>> indexesOnThisAttribute = attributeIndexes.get(indexedAttribute);
+
+                removed = indexesOnThisAttribute.remove(attributeIndex);
+
+                if (attributeIndex instanceof UniqueIndex) {
+                    // Remove from UniqueIndexes as well...
+                    removed = uniqueIndexes.remove(indexedAttribute, attributeIndex) || removed;
+                }
+
+                if (indexesOnThisAttribute.isEmpty()) {
+                    // If there are no more indexes left on this attribute,
+                    // remove the Set which was used to store indexes on the attribute also...
+                    attributeIndexes.remove(indexedAttribute);
+                }
+            }
+        }
+        else {
+            throw new IllegalStateException("Unexpected type of index: " + (index == null ? null : index.getClass().getName()));
+        }
+        if (removed && !index.isMutable()) {
+            // Remove from the set of immutable indexes; this is used by ensureMutable() and the isMutable() method...
+            immutableIndexes.remove(index);
+        }
+        // Notify the index that it has been removed, so that it can delete underlying storage used if necessary...
+        index.destroy(queryOptions);
+    }
+
 
     // -------------------- Method for accessing indexes --------------------
 
@@ -304,19 +377,67 @@ public class CollectionQueryEngine<O> implements QueryEngineInternal<O> {
      * @param queryOptions Optional parameters for the query
      * @return A {@link ResultSet} from the index with the lowest retrieval cost which supports the given query
      */
-    <A> ResultSet<O> getResultSetWithLowestRetrievalCost(SimpleQuery<O, A> query, QueryOptions queryOptions) {
-        // First check if a UniqueIndex is available, as this will have the lowest cost...
+    <A> ResultSet<O> retrieveSimpleQuery(SimpleQuery<O, A> query, QueryOptions queryOptions) {
+        // First, check if a standing query index is available for the query...
+        ResultSet<O> lowestCostResultSet = retrieveFromStandingQueryIndexIfAvailable(query, queryOptions);
+        if (lowestCostResultSet != null) {
+            // A standing query index is available for this query.
+            // Results from standing query indexes are considered to have the lowest cost, so we simply return these results...
+            return lowestCostResultSet;
+        }
+        // At this point, no standing query indexes were available,
+        // so we proceed to check for other indexes on the attribute...
+
+        // Check if a UniqueIndex is available, as this will have the lowest cost of attribute-based indexes...
         Index<O> uniqueIndex = uniqueIndexes.get(query.getAttribute());
         if (uniqueIndex!= null && uniqueIndex.supportsQuery(query, queryOptions)){
             return uniqueIndex.retrieve(query, queryOptions);
         }
 
+        // At this point, we did not find any UniqueIndex, so we now check for other attribute-based indexes
+        // and we determine which one has the lowest retrieval cost...
+
+        int lowestRetrievalCost = 0;
         // Examine other (non-unique) indexes...
         Iterable<Index<O>> indexesOnAttribute = getIndexesOnAttribute(query.getAttribute());
 
         // Choose the index with the lowest retrieval cost for this query...
-        ResultSet<O> lowestCostResultSet = null;
+        for (Index<O> index : indexesOnAttribute) {
+            if (index.supportsQuery(query, queryOptions)) {
+                ResultSet<O> thisIndexResultSet = index.retrieve(query, queryOptions);
+                int thisIndexRetrievalCost = thisIndexResultSet.getRetrievalCost();
+                if (lowestCostResultSet == null || thisIndexRetrievalCost < lowestRetrievalCost) {
+                    lowestCostResultSet = thisIndexResultSet;
+                    lowestRetrievalCost = thisIndexRetrievalCost;
+                }
+            }
+        }
+
+        if (lowestCostResultSet == null) {
+            // This should never happen (would indicate a bug);
+            // the fallback index should have been selected in worst case...
+            throw new IllegalStateException("Failed to locate an index supporting query: " + query);
+        }
+        return new CostCachingResultSet<O>(lowestCostResultSet);
+    }
+
+    /**
+     * Returns a {@link ResultSet} from the index with the lowest retrieval cost which supports the given query.
+     * <p/>
+     * For a definition of retrieval cost see {@link ResultSet#getRetrievalCost()}.
+     *
+     * @param query The query which refers to an attribute
+     * @param queryOptions Optional parameters for the query
+     * @return A {@link ResultSet} from the index with the lowest retrieval cost which supports the given query
+     */
+    <A> ResultSet<O> retrieveComparativeQuery(ComparativeQuery<O, A> query, QueryOptions queryOptions) {
+        // Determine which of the indexes on the query's attribute have the lowest retrieval cost...
         int lowestRetrievalCost = 0;
+        ResultSet<O> lowestCostResultSet = null;
+
+        Iterable<Index<O>> indexesOnAttribute = getIndexesOnAttribute(query.getAttribute());
+
+        // Choose the index with the lowest retrieval cost for this query...
         for (Index<O> index : indexesOnAttribute) {
             if (index.supportsQuery(query, queryOptions)) {
                 ResultSet<O> thisIndexResultSet = index.retrieve(query, queryOptions);
@@ -868,7 +989,8 @@ public class CollectionQueryEngine<O> implements QueryEngineInternal<O> {
      * This method is recursive.
      * <p/>
      * When processing a {@link SimpleQuery}, the method will simply delegate to the helper methods
-     * {@link #retrieveIntersection(Collection, QueryOptions, boolean)} and {@link #retrieveUnion(Collection, QueryOptions)}
+     * {@link #retrieveIntersectionOfSimpleQueries(Collection, QueryOptions, boolean)} and
+     * {@link #retrieveUnionOfSimpleQueries(Collection, QueryOptions)}
      * and will return their results.
      * <p/>
      * When processing a descendant of {@link CompoundQuery} ({@link And}, {@link Or}, {@link Not}), the method
@@ -889,22 +1011,24 @@ public class CollectionQueryEngine<O> implements QueryEngineInternal<O> {
         final boolean indexMergeStrategyEnabled = isFlagEnabled(queryOptions, PREFER_INDEX_MERGE_STRATEGY);
 
         // Check if we can process this query from a standing query index...
-        Index<O> standingQueryIndex = standingQueryIndexes.get(query);
-        if (standingQueryIndex != null) {
-            // No deduplication required for standing queries.
-            if (standingQueryIndex instanceof StandingQueryIndex) {
-                return standingQueryIndex.retrieve(query, queryOptions);
-            }
-            else {
-                return standingQueryIndex.retrieve(equal(forStandingQuery(query), Boolean.TRUE), queryOptions);
-            }
-        } // else no suitable standing query index exists, process the query normally...
+        ResultSet<O> resultSetFromStandingQueryIndex = retrieveFromStandingQueryIndexIfAvailable(query, queryOptions);
+        if (resultSetFromStandingQueryIndex != null) {
+            // A standing query index was available, return its results...
+            return resultSetFromStandingQueryIndex;
+        }
+        // ..else no standing query index was available, process the query normally...
+
 
         if (query instanceof SimpleQuery) {
             // No deduplication required for a single SimpleQuery.
             // Return the ResultSet from the index with the lowest retrieval cost which supports
             // this query and the attribute on which it is based...
-            return getResultSetWithLowestRetrievalCost((SimpleQuery<O, ?>) query, queryOptions);
+            return retrieveSimpleQuery((SimpleQuery<O, ?>) query, queryOptions);
+        }
+        else if (query instanceof ComparativeQuery) {
+            // Return the ResultSet from the index with the lowest retrieval cost which supports
+            // this query and the attribute on which it is based...
+            return retrieveComparativeQuery((ComparativeQuery<O, ?>) query, queryOptions);
         }
         else if (query instanceof And) {
             final And<O> and = (And<O>) query;
@@ -923,17 +1047,18 @@ public class CollectionQueryEngine<O> implements QueryEngineInternal<O> {
             } // else no suitable compound index exists, process the And query normally...
 
             // No deduplication required for intersections.
-            return new ResultSetIntersection<O>(new Iterable<ResultSet<O>>() {
+            Iterable<ResultSet<O>> resultSetsToMerge = new Iterable<ResultSet<O>>() {
                 @Override
                 public Iterator<ResultSet<O>> iterator() {
                     return new UnmodifiableIterator<ResultSet<O>>() {
 
                         boolean needToProcessSimpleQueries = and.hasSimpleQueries();
+                        boolean needToProcessComparativeQueries = and.hasComparativeQueries();
                         Iterator<LogicalQuery<O>> logicalQueriesIterator = and.getLogicalQueries().iterator();
 
                         @Override
                         public boolean hasNext() {
-                            return needToProcessSimpleQueries || logicalQueriesIterator.hasNext();
+                            return needToProcessSimpleQueries || needToProcessComparativeQueries || logicalQueriesIterator.hasNext();
                         }
 
                         @Override
@@ -941,14 +1066,21 @@ public class CollectionQueryEngine<O> implements QueryEngineInternal<O> {
                             if (needToProcessSimpleQueries) {
                                 needToProcessSimpleQueries = false;
                                 // Retrieve results for simple queries from indexes...
-                                return retrieveIntersection(and.getSimpleQueries(), queryOptions, indexMergeStrategyEnabled);
+                                return retrieveIntersectionOfSimpleQueries(and.getSimpleQueries(), queryOptions, indexMergeStrategyEnabled);
+                            }
+                            if (needToProcessComparativeQueries) {
+                                needToProcessComparativeQueries = false;
+                                // Retrieve results for comparative queries from indexes...
+                                return retrieveIntersectionOfComparativeQueries(and.getComparativeQueries(), queryOptions);
                             }
                             // Recursively call this method for logical queries...
                             return retrieveRecursive(logicalQueriesIterator.next(), queryOptions);
                         }
                     };
                 }
-            }, query, queryOptions, indexMergeStrategyEnabled);
+            };
+            boolean useIndexMergeStrategy = shouldUseIndexMergeStrategy(indexMergeStrategyEnabled, and.hasComparativeQueries(), resultSetsToMerge);
+            return new ResultSetIntersection<O>(resultSetsToMerge, query, queryOptions, useIndexMergeStrategy);
         }
         else if (query instanceof Or) {
             final Or<O> or = (Or<O>) query;
@@ -976,11 +1108,12 @@ public class CollectionQueryEngine<O> implements QueryEngineInternal<O> {
                     return new UnmodifiableIterator<ResultSet<O>>() {
 
                         boolean needToProcessSimpleQueries = or.hasSimpleQueries();
+                        boolean needToProcessComparativeQueries = or.hasComparativeQueries();
                         Iterator<LogicalQuery<O>> logicalQueriesIterator = or.getLogicalQueries().iterator();
 
                         @Override
                         public boolean hasNext() {
-                            return needToProcessSimpleQueries || logicalQueriesIterator.hasNext();
+                            return needToProcessSimpleQueries || needToProcessComparativeQueries || logicalQueriesIterator.hasNext();
                         }
 
                         @Override
@@ -988,7 +1121,12 @@ public class CollectionQueryEngine<O> implements QueryEngineInternal<O> {
                             if (needToProcessSimpleQueries) {
                                 needToProcessSimpleQueries = false;
                                 // Retrieve results for simple queries from indexes...
-                                return retrieveUnion(or.getSimpleQueries(), queryOptionsForOrUnion);
+                                return retrieveUnionOfSimpleQueries(or.getSimpleQueries(), queryOptionsForOrUnion);
+                            }
+                            if (needToProcessComparativeQueries) {
+                                needToProcessComparativeQueries = false;
+                                // Retrieve results for comparative queries from indexes...
+                                return retrieveUnionOfComparativeQueries(or.getComparativeQueries(), queryOptionsForOrUnion);
                             }
                             // Recursively call this method for logical queries.
                             // Note we supply the original queryOptions for recursive calls...
@@ -1000,13 +1138,14 @@ public class CollectionQueryEngine<O> implements QueryEngineInternal<O> {
             ResultSet<O> union;
             // *** Deduplication can be required for unions... ***
             if (DeduplicationOption.isLogicalElimination(queryOptionsForOrUnion)) {
-                union = new ResultSetUnion<O>(resultSetsToUnion, query, queryOptions, indexMergeStrategyEnabled);
+                boolean useIndexMergeStrategy = shouldUseIndexMergeStrategy(indexMergeStrategyEnabled, or.hasComparativeQueries(), resultSetsToUnion);
+                union = new ResultSetUnion<O>(resultSetsToUnion, query, queryOptions, useIndexMergeStrategy);
             }
             else {
                 union = new ResultSetUnionAll<O>(resultSetsToUnion, query, queryOptions);
             }
 
-            if (union.getRetrievalCost() == Integer.MAX_VALUE) {
+            if (union.getRetrievalCost() == Integer.MAX_VALUE && !or.hasComparativeQueries()) {
                 // Either no indexes are available for any branches of the or() query, or indexes are only available
                 // for some of the branches.
                 // If we were to delegate to the FallbackIndex to retrieve results for any of the branches which
@@ -1057,14 +1196,14 @@ public class CollectionQueryEngine<O> implements QueryEngineInternal<O> {
      * <p/>
      * The algorithm then returns a {@link FilteringResultSet} which iterates the {@link ResultSet} with the
      * <i>lowest</i> <u>merge cost</u>. During iteration, this {@link FilteringResultSet} calls a
-     * {@link FilteringResultSet#isValid(Object, com.googlecode.cqengine.query.option.QueryOptions)} method for each object. This algorithm implements that method to
+     * {@link FilteringResultSet#isValid(Object, QueryOptions)} method for each object. This algorithm implements that method to
      * return true if the object matches all of the {@link SimpleQuery}s which had the <i>more expensive</i>
      * <u>merge costs</u>.
      * <p/>
      * As such the {@link ResultSet} which had the lowest merge cost drives the iteration.  Note therefore that this
      * method <i>does <u>not</u> perform set intersections in the conventional sense</i> (i.e. using
      * {@link Set#contains(Object)}). It has been tested empirically that it is usually cheaper to invoke
-     * {@link Query#matches(Object, com.googlecode.cqengine.query.option.QueryOptions)} to test each object in the smallest set against queries which would match the
+     * {@link Query#matches(Object, QueryOptions)} to test each object in the smallest set against queries which would match the
      * more expensive sets, rather than perform several hash lookups and equality tests between multiple sets.
      *
      * @param queries A collection of {@link SimpleQuery} objects to be retrieved and intersected
@@ -1072,20 +1211,42 @@ public class CollectionQueryEngine<O> implements QueryEngineInternal<O> {
      * @return A {@link ResultSet} which provides objects matching the intersection of results for each of the
      * {@link SimpleQuery}s
      */
-    <A> ResultSet<O> retrieveIntersection(Collection<SimpleQuery<O, ?>> queries, QueryOptions queryOptions, boolean indexMergeStrategyEnabled) {
+    <A> ResultSet<O> retrieveIntersectionOfSimpleQueries(Collection<SimpleQuery<O, ?>> queries, QueryOptions queryOptions, boolean indexMergeStrategyEnabled) {
         List<ResultSet<O>> resultSets = new ArrayList<ResultSet<O>>(queries.size());
         for (SimpleQuery query : queries) {
             // Work around type erasure...
             @SuppressWarnings({"unchecked"})
             SimpleQuery<O, A> queryTyped = (SimpleQuery<O, A>) query;
-            ResultSet<O> resultSet = getResultSetWithLowestRetrievalCost(queryTyped, queryOptions);
+            ResultSet<O> resultSet = retrieveSimpleQuery(queryTyped, queryOptions);
             resultSets.add(resultSet);
         }
         @SuppressWarnings("unchecked")
         Collection<Query<O>> queriesTyped = (Collection<Query<O>>)(Collection<? extends Query<O>>)queries;
         Query<O> query = queriesTyped.size() == 1 ? queriesTyped.iterator().next() : new And<O>(queriesTyped);
-        // The rest of the algorithm is implemented in ResultSetIntersection...
-        return new ResultSetIntersection<O>(resultSets, query, queryOptions, indexMergeStrategyEnabled);
+
+        boolean useIndexMergeStrategy = indexMergeStrategyEnabled && indexesAvailableForAllResultSets(resultSets);
+        return new ResultSetIntersection<O>(resultSets, query, queryOptions, useIndexMergeStrategy);
+    }
+
+    /**
+     * Same as {@link #retrieveIntersectionOfSimpleQueries(Collection, QueryOptions, boolean)}
+     * except for {@link ComparativeQuery}.
+     */
+    <A> ResultSet<O> retrieveIntersectionOfComparativeQueries(Collection<ComparativeQuery<O, ?>> queries, QueryOptions queryOptions) {
+        List<ResultSet<O>> resultSets = new ArrayList<ResultSet<O>>(queries.size());
+        for (ComparativeQuery query : queries) {
+            // Work around type erasure...
+            @SuppressWarnings({"unchecked"})
+            ComparativeQuery<O, A> queryTyped = (ComparativeQuery<O, A>) query;
+            ResultSet<O> resultSet = retrieveComparativeQuery(queryTyped, queryOptions);
+            resultSets.add(resultSet);
+        }
+        @SuppressWarnings("unchecked")
+        Collection<Query<O>> queriesTyped = (Collection<Query<O>>)(Collection<? extends Query<O>>)queries;
+        Query<O> query = queriesTyped.size() == 1 ? queriesTyped.iterator().next() : new And<O>(queriesTyped);
+
+        // We always use index merge strategy to merge results for comparative queries...
+        return new ResultSetIntersection<O>(resultSets, query, queryOptions, true);
     }
 
     /**
@@ -1113,7 +1274,7 @@ public class CollectionQueryEngine<O> implements QueryEngineInternal<O> {
      * @return A {@link ResultSet} which provides objects matching the union of results for each of the
      * {@link SimpleQuery}s
      */
-    ResultSet<O> retrieveUnion(final Collection<SimpleQuery<O, ?>> queries, final QueryOptions queryOptions) {
+    ResultSet<O> retrieveUnionOfSimpleQueries(final Collection<SimpleQuery<O, ?>> queries, final QueryOptions queryOptions) {
         Iterable<ResultSet<O>> resultSetsToUnion = new Iterable<ResultSet<O>>() {
             @Override
             public Iterator<ResultSet<O>> iterator() {
@@ -1127,7 +1288,7 @@ public class CollectionQueryEngine<O> implements QueryEngineInternal<O> {
 
                     @Override
                     public ResultSet<O> next() {
-                        return getResultSetWithLowestRetrievalCost(queriesIterator.next(), queryOptions);
+                        return retrieveSimpleQuery(queriesIterator.next(), queryOptions);
                     }
                 };
             }
@@ -1137,12 +1298,75 @@ public class CollectionQueryEngine<O> implements QueryEngineInternal<O> {
         Query<O> query = queriesTyped.size() == 1 ? queriesTyped.iterator().next() : new Or<O>(queriesTyped);
         // Perform deduplication as necessary...
         if (DeduplicationOption.isLogicalElimination(queryOptions)) {
+            // Use the index merge strategy if it was requested and indexes are available for all result sets...
             boolean indexMergeStrategyEnabled = isFlagEnabled(queryOptions, PREFER_INDEX_MERGE_STRATEGY);
-            return new ResultSetUnion<O>(resultSetsToUnion, query, queryOptions, indexMergeStrategyEnabled);
+            boolean useIndexMergeStrategy = indexMergeStrategyEnabled && indexesAvailableForAllResultSets(resultSetsToUnion);
+            return new ResultSetUnion<O>(resultSetsToUnion, query, queryOptions, useIndexMergeStrategy);
         }
         else {
             return new ResultSetUnionAll<O>(resultSetsToUnion, query, queryOptions);
         }
+    }
+
+    /**
+     * Same as {@link #retrieveUnionOfSimpleQueries(Collection, QueryOptions)}
+     * except for {@link ComparativeQuery}.
+     */
+    ResultSet<O> retrieveUnionOfComparativeQueries(final Collection<ComparativeQuery<O, ?>> queries, final QueryOptions queryOptions) {
+        Iterable<ResultSet<O>> resultSetsToUnion = new Iterable<ResultSet<O>>() {
+            @Override
+            public Iterator<ResultSet<O>> iterator() {
+                return new UnmodifiableIterator<ResultSet<O>>() {
+
+                    Iterator<ComparativeQuery<O, ?>> queriesIterator = queries.iterator();
+                    @Override
+                    public boolean hasNext() {
+                        return queriesIterator.hasNext();
+                    }
+
+                    @Override
+                    public ResultSet<O> next() {
+                        return retrieveComparativeQuery(queriesIterator.next(), queryOptions);
+                    }
+                };
+            }
+        };
+        @SuppressWarnings("unchecked")
+        Collection<Query<O>> queriesTyped = (Collection<Query<O>>)(Collection<? extends Query<O>>)queries;
+        Query<O> query = queriesTyped.size() == 1 ? queriesTyped.iterator().next() : new Or<O>(queriesTyped);
+        // Perform deduplication as necessary...
+        if (DeduplicationOption.isLogicalElimination(queryOptions)) {
+            // Note: we always use the index merge strategy to merge results for comparative queries...
+            return new ResultSetUnion<O>(resultSetsToUnion, query, queryOptions, true);
+        }
+        else {
+            return new ResultSetUnionAll<O>(resultSetsToUnion, query, queryOptions);
+        }
+    }
+
+    /**
+     * Checks if the given query can be answered from a standing query index, and if so returns
+     * a {@link ResultSet} which does so.
+     * If the query cannot be answered from a standing query index, returns null.
+     *
+     * @param query The query to evaluate
+     * @param queryOptions Query options supplied for the query
+     * @return A {@link ResultSet} which answers the query from a standing query index, or null if no such index
+     * is available
+     */
+    ResultSet<O> retrieveFromStandingQueryIndexIfAvailable(Query<O> query, final QueryOptions queryOptions) {
+        // Check if we can process this query from a standing query index...
+        Index<O> standingQueryIndex = standingQueryIndexes.get(query);
+        if (standingQueryIndex != null) {
+            // No deduplication required for standing queries.
+            if (standingQueryIndex instanceof StandingQueryIndex) {
+                return standingQueryIndex.retrieve(query, queryOptions);
+            }
+            else {
+                return standingQueryIndex.retrieve(equal(forStandingQuery(query), Boolean.TRUE), queryOptions);
+            }
+        } // else no suitable standing query index exists, process the query normally...
+        return null;
     }
 
     /**
@@ -1200,14 +1424,14 @@ public class CollectionQueryEngine<O> implements QueryEngineInternal<O> {
      */
     @Override
     public boolean isMutable() {
-        return allIndexesAreMutable;
+        return immutableIndexes.isEmpty();
     }
 
     /**
      * Throws an {@link IllegalStateException} if all indexes are not mutable.
      */
     void ensureMutable() {
-        if (!allIndexesAreMutable) {
+        if (!immutableIndexes.isEmpty()) {
             throw new IllegalStateException("Cannot modify indexes, an immutable index has been added.");
         }
     }
@@ -1267,5 +1491,30 @@ public class CollectionQueryEngine<O> implements QueryEngineInternal<O> {
 
     static String getClassNameNullSafe(Object object) {
         return object == null ? null : object.getClass().getName();
+    }
+
+    /**
+     * Indicates if the engine should use the index merge strategy.
+     * <p>
+     * This will return true if comparativeQueriesPresent is true, because it is necessary to use
+     * the index merge strategy with comparative queries, because comparative queries do not support filtering.
+     * <p>
+     * Otherwise, if there are no comparative queries involved, this will return true if indexes are available for all
+     * of the given result sets AND the index merge strategy was requested.
+     */
+    static <O> boolean shouldUseIndexMergeStrategy(boolean strategyRequested, boolean comparativeQueriesPresent, Iterable<ResultSet<O>> resultSetsToMerge) {
+        if (comparativeQueriesPresent) {
+            return true;
+        }
+        return strategyRequested && indexesAvailableForAllResultSets(resultSetsToMerge);
+    }
+
+    static <O> boolean indexesAvailableForAllResultSets(Iterable<ResultSet<O>> resultSetsToMerge) {
+        for (ResultSet<O> resultSet : resultSetsToMerge) {
+            if (resultSet.getRetrievalCost() == Integer.MAX_VALUE) {
+                return false;
+            }
+        }
+        return true;
     }
 }

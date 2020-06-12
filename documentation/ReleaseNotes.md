@@ -1,5 +1,80 @@
 # CQEngine Release Notes #
 
+## Version 3.5.0 - 2020-03-29 ###
+  * Added [MetadataEngine API](http://htmlpreview.github.io/?http://raw.githubusercontent.com/npgall/cqengine/master/documentation/javadoc/apidocs/com/googlecode/cqengine/metadata/MetadataEngine.html) - a high level API for accessing metadata from indexes
+    * Accessible via `IndexedCollection.getMetadataEngine()`
+    * Supports:
+      * Frequency distributions (the counts of each attribute value)
+      * Distinct keys (what are the distinct attribute values in an index)
+      * Distinct keys within a range (what are the distinct attribute values in an index between x and y)
+      * Get a stream of attribute values and associated objects from an index (ascending/descending order)
+      * Get a stream of attribute values and associated objects from an index between attribute values x and y
+      * Count distinct keys (how many distinct attribute values are in an index)
+      * Count for a specific key (how many objects match a specific attribute value)
+  * Added support for "[comparative queries](http://htmlpreview.github.io/?http://raw.githubusercontent.com/npgall/cqengine/master/documentation/javadoc/apidocs/com/googlecode/cqengine/query/ComparativeQuery.html)"
+    * These are a type of query which can only be answered by comparing objects in the collection with each other
+    * Comparative queries included:
+      * `LongestPrefix` - find the longest stored prefix in a collection for a given query term
+        * Many thanks to Glen Lockhart (glockhart) for contributing this! (resolves #253)
+      * The following queries should be considered **beta** (they will be renamed and augmented in the next release)
+        * `Min` - find the objects which have the minimum value for an attribute
+        * `Max` - find the objects which have the maximum value for an attribute
+
+
+## Version 3.4.0 - 2019-06-07 ###
+  * Added null checking to constructors of query objects (resolves issue #223)
+  * Fixed bug which prevented standing query indexes from being considered for nested simple queries (resolves issue #232)
+  * Improved exception handling in `TransactionalIndexedCollection` `retrieve()` method, to ensure that read locks are released in the case that an unexpected exception was thrown (resolves issue #235)
+  * Added `destroy()` method to indexes, which is now called when they are removed from the collection; allows disk and off-heap based indexes to free storage/memory when removed.
+
+## Version 3.3.0 - 2019-05-18 ###
+  * Added `IndexedCollection.removeIndex()` method, which allows to remove/drop indexes from the collection (resolves issue #208).
+  * Added support in `AttributeBytecodeGenerator` to auto-generate attributes with human-readable names from getter methods (resolves issue #181).
+  * Fixed handling of escaped quotes in SQL queries (resolves issue #207).
+  * Updated SQL grammar to allow negative numbers in SQL queries (resolves issue #213).
+  * Added `IndexedCollection.getPersistence()` method (resolves issue #226).
+  * Updated `shared_cache` mode of `DiskPersistence`, to use a read-write lock by default. This should prevent exceptions being thrown when concurrent write operations cannot be supported by the SQLite shared cache (can be disabled via properties).
+
+## Version 3.2.0 - 2019-04-28 ###
+  * CQEngine is now compatible with Java 11 (Java 8, 9, 10, 11).
+  * This release is practically identical to 3.1.0, except CQEngine's own dependencies are upgraded to versions which are now all compatible with Java 11.
+
+## Version 3.1.0 - 2019-04-28 ###
+  * Improved concurrency support in CQEngine DiskPersistence
+    * This resolves issue 227 via pull request 229.
+    * Many thanks to @jayaramcs and @codingchili for help, and to @codingchili for the Pull Request.
+  * CQEngine operates SQLite in WAL mode by default, and this release changes the default sync mode from FULL to NORMAL. For more details see: https://www.sqlite.org/wal.html
+    * Applications requiring the old setting (i.e. sync mode FULL) can override this setting via properties, see documentation in class DiskPersistence for details.
+  * This release also includes an additional (optional) feature to use the Shared-Cache Mode in SQLite for DiskPersistence. For more details see: https://www.sqlite.org/sharedcache.html
+    * Shared-Cache Mode can significantly improve throughput (especially read throughput) and reduce latency for DiskPersistence. However it supports less concurrency for writes, and so it is not enabled by default. The benefit may be application-dependent.
+    * Applications wishing to improve read throughput and reduce read latency when using DiskPersistence, could experiment with that setting. It can be enabled by configuring a property. See documentation in class DiskPersistence for details.
+ 
+
+## Version 3.0.0 - 2018-09-15 ###
+  * CQEngine is now officially compatible with Java 8, 9 & 10; and is no longer compatible with Java 6 & 7.
+  * CQEngine now has tighter integration with Java 8+ streams:
+    * A new method `ResultSet.stream()` has been added, which makes it easier than before to convert a `ResultSet` to a `Stream`.
+    * The dependency on the `cqengine-stream-support` library has been removed as it is no longer necessary.
+  * The 3.x release upgrades many of CQEngine's own dependencies to the latest versions, to ensure that those dependencies are also compatible with the newer versions of Java.
+  * **Backwards compatibility note**
+    * Unfortunately, the upgrade of CQEngine's dependency on the [Kryo serialization library](https://github.com/EsotericSoftware/kryo) from version 3.x to version 5.x may introduce a **backwards incompatibile change** change for some users.
+    * Data saved by Kryo 3.x cannot be read by Kryo 5.x.
+      * This unfortunately means any CQEngine `IndexedCollection`s saved to disk with CQEngine's `DiskPersistence` with earlier versions of CQEngine and Kryo, cannot be read by the newer versions.
+      * As Kryo 3.x is not compatible with newer versions of Java, there is not much that can be done on the CQEngine side to work around this.
+    * **Migration advice**
+      * The Kryo site provides some guidance on how to [migrate to Kryo 5](https://github.com/EsotericSoftware/kryo/wiki/Migration-to-v5).
+      * Essentially, before upgrading to CQEngine 3.x you can export saved objects from an `IndexedCollection` to a different format (e.g. JsonBeans), then upgrade to CQEngine 3.x, and then reimport the objects from JsonBeans to an IndexedCollection.
+    * Users who do not use `DiskPersistence` will not be affected by this, and CQEngine 3.x should be a drop-in replacement for CQEngine 2.x as long as the application is running on Java 8+.
+
+## Version 2.12.4 - 2017-11-24 ###
+  * Performance improvement. Improved handling of Or queries when one clause is None (Thanks to stevebarham for the suggestion and investigation; fixes #167).
+  
+### Version 2.12.3 - 2017-11-20 ###
+  * Updated the configuration of maven-shade-plugin, to fix an issue which can prevent `AttributeBytecodeGenerator` from working correctly when CQEngine is run from the shaded jar.
+  
+### Version 2.12.2 - 2017-10-29 ###
+  * Added support to auto-generate attributes from getter methods in POJOs. Previously it was only possible to auto-generate attributes for fields in POJOs. This new feature is supported by both `AttributeSourceGenerator` and `AttributeBytecodeGenerator`.
+  
 ### Version 2.12.1 - 2017-07-20 ###
   * Added workaround for JDK `ConcurrentHashMap` performance bottleneck [JDK-8160751](https://bugs.openjdk.java.net/browse/JDK-8160751), with thanks to zenzondon for reporting it (issue 154)
   * This may improve performance of `IndexedCollection.update()` and `removeAll()` methods when using on-heap persistence and CQEngine is run on Java 8 or earlier.

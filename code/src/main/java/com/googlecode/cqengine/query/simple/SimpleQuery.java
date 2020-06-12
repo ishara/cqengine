@@ -111,11 +111,11 @@ public abstract class SimpleQuery<O, A> implements Query<O> {
 
     abstract protected int calcHashCode();
 
-    protected static String asLiteral(Object value) {
+    public static String asLiteral(Object value) {
         return value instanceof String ? "\"" + value + "\"" : String.valueOf(value);
     }
 
-    protected static String asLiteral(String value) {
+    public static String asLiteral(String value) {
         return "\"" + value + "\"";
     }
 }

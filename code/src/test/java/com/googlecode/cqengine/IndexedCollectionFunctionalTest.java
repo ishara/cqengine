@@ -20,21 +20,21 @@ import com.googlecode.cqengine.attribute.SimpleAttribute;
 import com.googlecode.cqengine.attribute.StandingQueryAttribute;
 import com.googlecode.cqengine.index.AttributeIndex;
 import com.googlecode.cqengine.index.Index;
+import com.googlecode.cqengine.index.compound.CompoundIndex;
 import com.googlecode.cqengine.index.compound.support.CompoundValueTuple;
 import com.googlecode.cqengine.index.disk.DiskIndex;
 import com.googlecode.cqengine.index.disk.PartialDiskIndex;
+import com.googlecode.cqengine.index.hash.HashIndex;
+import com.googlecode.cqengine.index.navigable.NavigableIndex;
 import com.googlecode.cqengine.index.navigable.PartialNavigableIndex;
 import com.googlecode.cqengine.index.offheap.OffHeapIndex;
 import com.googlecode.cqengine.index.offheap.PartialOffHeapIndex;
-import com.googlecode.cqengine.index.standingquery.StandingQueryIndex;
-import com.googlecode.cqengine.index.support.AbstractMapBasedAttributeIndex;
-import com.googlecode.cqengine.index.compound.CompoundIndex;
-import com.googlecode.cqengine.index.hash.HashIndex;
-import com.googlecode.cqengine.index.navigable.NavigableIndex;
 import com.googlecode.cqengine.index.radix.RadixTreeIndex;
 import com.googlecode.cqengine.index.radixinverted.InvertedRadixTreeIndex;
 import com.googlecode.cqengine.index.radixreversed.ReversedRadixTreeIndex;
+import com.googlecode.cqengine.index.standingquery.StandingQueryIndex;
 import com.googlecode.cqengine.index.suffix.SuffixTreeIndex;
+import com.googlecode.cqengine.index.support.AbstractMapBasedAttributeIndex;
 import com.googlecode.cqengine.index.support.indextype.DiskTypeIndex;
 import com.googlecode.cqengine.index.support.indextype.OffHeapTypeIndex;
 import com.googlecode.cqengine.index.unique.UniqueIndex;
@@ -84,11 +84,13 @@ public class IndexedCollectionFunctionalTest {
     // Note: Unfortunately ObjectLockingIndexedCollection can slow down the functional test a lot when
     // disk indexes are in use (because it splits bulk inserts into a separate transaction per object).
     // Set this true to skip the slow scenarios *during development only!*...
-    static final boolean SKIP_SLOW_SCENARIOS = Boolean.valueOf(System.getProperty("cqengine.skip.slow.scenarios", "false"));
+    static final boolean SKIP_SLOW_SCENARIOS =
+            "true".equalsIgnoreCase(System.getProperty("cqengine.skip.slow.scenarios")) // system property
+            || "true".equalsIgnoreCase(System.getenv("cqengine_skip_slow_scenarios")); // environment variable
 
     static final boolean RUN_HIGH_PRIORITY_SCENARIOS_ONLY = false;
 
-    // Print progress of functional tests to the console at this frequncy...
+    // Print progress of functional tests to the console at this frequency...
     final int STATUS_UPDATE_FREQUENCY_MS = 1000;
     static long lastStatusTimestamp = 0L;
 
@@ -501,6 +503,13 @@ public class IndexedCollectionFunctionalTest {
                                 expectedResults = new ExpectedResults() {{
                                     size = 1000;
                                 }};
+                            }},
+                            new QueryToEvaluate() {{
+                                query = isPrefixOf(Car.MANUFACTURER, "BMW2");
+                                queryOptions = queryOptions(deduplicate(DeduplicationStrategy.MATERIALIZE));
+                                expectedResults = new ExpectedResults() {{
+                                    size = 100;
+                                }};
                             }}
                     );
                     indexCombinations = indexCombinations(
@@ -532,6 +541,114 @@ public class IndexedCollectionFunctionalTest {
                             indexCombination(DiskIndex.onAttribute(Car.FEATURES)),
                             indexCombination(DiskIndex.onAttribute(Car.MANUFACTURER)),
                             indexCombination(OffHeapIndex.onAttribute(Car.MANUFACTURER))
+                    );
+                }},
+                new MacroScenario() {{
+                    name = "comparative queries";
+                    dataSet = SMALL_DATASET;
+                    alsoEvaluateWithIndexMergeStrategy = false;
+                    collectionImplementations = classes(ConcurrentIndexedCollection.class);
+                    queriesToEvaluate = asList(
+                            new QueryToEvaluate() {{
+                                query = min(Car.PRICE); // will invoke Min.getMatchesForSimpleAttribute() for the noIndexes() scenario
+                                expectedResults = new ExpectedResults() {{
+                                    size = 1;
+                                    carIdsAnyOrder = asSet(4); // car with the lowest price
+                                }};
+                            }},
+                            new QueryToEvaluate() {{
+                                query = max(Car.PRICE); // will invoke Max.getMatchesForSimpleAttribute() for the noIndexes() scenario
+                                expectedResults = new ExpectedResults() {{
+                                    size = 1;
+                                    carIdsAnyOrder = asSet(9); // car with the highest price
+                                }};
+                            }},
+                            new QueryToEvaluate() {{
+                                query = min(Car.DOORS);
+                                expectedResults = new ExpectedResults() {{
+                                    size = 1;
+                                    carIdsAnyOrder = asSet(9); // cars with 2 doors
+                                }};
+                            }},
+                            new QueryToEvaluate() {{
+                                query = max(Car.DOORS);
+                                expectedResults = new ExpectedResults() {{
+                                    size = 5;
+                                    carIdsAnyOrder = asSet(0, 3, 4, 6, 8); // cars with 5 doors
+                                }};
+                            }},
+                            new QueryToEvaluate() {{
+                                query = min(Car.KEYWORDS); // will invoke Min.getMatchesForNonSimpleAttribute() for the noIndexes() scenario
+                                expectedResults = new ExpectedResults() {{
+                                    size = 2;
+                                    carIdsAnyOrder = asSet(2, 5); // cars with keyword "alpha"
+                                }};
+                            }},
+                            new QueryToEvaluate() {{
+                                query = max(Car.KEYWORDS);  // will invoke Max.getMatchesForNonSimpleAttribute() for the noIndexes() scenario
+                                expectedResults = new ExpectedResults() {{
+                                    size = 2;
+                                    carIdsAnyOrder = asSet(1, 9); // cars with keyword "zulu"
+                                }};
+                            }},
+                            new QueryToEvaluate() {{
+                                query = longestPrefix(Car.KEYWORDS, "very-good-car-indeed");
+                                queryOptions = queryOptions(deduplicate(DeduplicationStrategy.MATERIALIZE));
+                                expectedResults = new ExpectedResults() {{
+                                    size = 2;
+                                    carIdsAnyOrder = asSet(6, 8); // cars with keyword "very-good-car" and not keyword "very-good"
+                                }};
+                            }},
+                            new QueryToEvaluate() {{
+                                query = longestPrefix(Car.MANUFACTURER, "Toyota2");
+                                queryOptions = queryOptions(deduplicate(DeduplicationStrategy.MATERIALIZE));
+                                expectedResults = new ExpectedResults() {{
+                                    size = 3;
+                                    carIdsAnyOrder = asSet(6, 7, 8);
+                                }};
+                            }},
+                            // Test comparative queries enclosed in logical queries...
+                            new QueryToEvaluate() {{
+                                query = and(all(Car.class), min(Car.PRICE));
+                                expectedResults = new ExpectedResults() {{
+                                    size = 1;
+                                    carIdsAnyOrder = asSet(4);
+                                }};
+                            }},
+                            new QueryToEvaluate() {{
+                                query = and(none(Car.class), min(Car.PRICE));
+                                expectedResults = new ExpectedResults() {{
+                                    size = 0;
+                                }};
+                            }},
+                            new QueryToEvaluate() {{
+                                query = or(none(Car.class), min(Car.PRICE));
+                                queryOptions = queryOptions(deduplicate(DeduplicationStrategy.MATERIALIZE));
+                                expectedResults = new ExpectedResults() {{
+                                    size = 1;
+                                    carIdsAnyOrder = asSet(4);
+                                }};
+                            }},
+                            new QueryToEvaluate() {{
+                                query = or(all(Car.class), min(Car.PRICE));
+                                queryOptions = queryOptions(deduplicate(DeduplicationStrategy.MATERIALIZE));
+                                expectedResults = new ExpectedResults() {{
+                                    size = 10;
+                                }};
+                            }},
+                            new QueryToEvaluate() {{
+                                query = not(min(Car.PRICE));
+                                expectedResults = new ExpectedResults() {{
+                                    size = 9;
+                                }};
+                            }}
+                    );
+                    indexCombinations = indexCombinations(
+                            noIndexes(),
+                            indexCombination(NavigableIndex.onAttribute(Car.PRICE)),
+                            indexCombination(NavigableIndex.onAttribute(Car.KEYWORDS)),
+                            indexCombination(InvertedRadixTreeIndex.onAttribute(Car.KEYWORDS))
+
                     );
                 }},
                 new MacroScenario() {{
@@ -1239,7 +1356,7 @@ public class IndexedCollectionFunctionalTest {
                     );
                 }},
                 new MacroScenario() {{
-                    name = "standing query index";
+                    name = "standing query index on entire query";
                     dataSet = SMALL_DATASET;
                     collectionImplementations = classes(ConcurrentIndexedCollection.class);
                     queriesToEvaluate = singletonList(
@@ -1254,6 +1371,42 @@ public class IndexedCollectionFunctionalTest {
                     );
                     indexCombinations = indexCombinations(
                             indexCombination(StandingQueryIndex.onQuery(or(equal(Car.MANUFACTURER, "Ford"), equal(Car.COLOR, Car.Color.BLUE))))
+                    );
+                }},
+                new MacroScenario() {{
+                    name = "standing query index on nested logical query";
+                    dataSet = SMALL_DATASET;
+                    collectionImplementations = classes(ConcurrentIndexedCollection.class);
+                    queriesToEvaluate = singletonList(
+                            new QueryToEvaluate() {{
+                                query = and(all(Car.class), or(equal(Car.MANUFACTURER, "Ford"), equal(Car.COLOR, Car.Color.BLUE)));
+                                expectedResults = new ExpectedResults() {{
+                                    size = 5;
+                                    retrievalCost = 10;
+                                    mergeCost = 5;
+                                }};
+                            }}
+                    );
+                    indexCombinations = indexCombinations(
+                            indexCombination(StandingQueryIndex.onQuery(or(equal(Car.MANUFACTURER, "Ford"), equal(Car.COLOR, Car.Color.BLUE))))
+                    );
+                }},
+                new MacroScenario() {{
+                    name = "standing query index on nested simple query";
+                    dataSet = SMALL_DATASET;
+                    collectionImplementations = classes(ConcurrentIndexedCollection.class);
+                    queriesToEvaluate = singletonList(
+                            new QueryToEvaluate() {{
+                                query = and(equal(Car.MANUFACTURER, "Ford"), equal(Car.COLOR, Car.Color.RED));
+                                expectedResults = new ExpectedResults() {{
+                                    size = 2;
+                                    retrievalCost = 10;
+                                    mergeCost = 3; // there are 3 RED cars in total (although only 2 of them are Ford)
+                                }};
+                            }}
+                    );
+                    indexCombinations = indexCombinations(
+                            indexCombination(StandingQueryIndex.onQuery(equal(Car.COLOR, Car.Color.RED)))
                     );
                 }},
                 new MacroScenario() {{
@@ -1539,6 +1692,7 @@ public class IndexedCollectionFunctionalTest {
     static void closePersistenceIfNecessary(Persistence<Car, Integer> persistence) {
         if (persistence instanceof DiskPersistence) {
             DiskPersistence diskPersistence = (DiskPersistence) persistence;
+            diskPersistence.close();
             File diskPersistenceFile = diskPersistence.getFile();
             if (!diskPersistenceFile.delete()) {
                 throw new IllegalStateException("Failed to delete temporary disk persistence file: " + diskPersistenceFile);

@@ -33,8 +33,6 @@ import java.util.ArrayList;
 
 import static com.googlecode.cqengine.IndexedCollectionFunctionalTest.extractCarIds;
 import static com.googlecode.cqengine.query.QueryFactory.*;
-import static com.googlecode.cqengine.query.QueryFactory.not;
-import static com.googlecode.cqengine.query.QueryFactory.or;
 import static java.util.Arrays.asList;
 
 public class SQLParserTest {
@@ -80,7 +78,16 @@ public class SQLParserTest {
         assertQueriesEquals(not(equal(Car.MANUFACTURER, "Ford")), parser.query("SELECT * FROM cars WHERE (NOT ('manufacturer' = 'Ford'))"));
         assertQueriesEquals(equal(IS_BLUE, true), parser.query("SELECT * FROM cars WHERE (is_blue = true)"));
         assertQueriesEquals(equal(IS_BLUE, false), parser.query("SELECT * FROM cars WHERE (is_blue = false)"));
-
+        assertQueriesEquals(equal(Car.DOORS, 3), parser.query("SELECT * FROM cars WHERE 'doors' = 3"));
+        assertQueriesEquals(equal(Car.DOORS, 3), parser.query("SELECT * FROM cars WHERE 'doors' = +3"));
+        assertQueriesEquals(equal(Car.DOORS, -3), parser.query("SELECT * FROM cars WHERE 'doors' = -3"));
+        assertQueriesEquals(equal(Car.PRICE, 3.0), parser.query("SELECT * FROM cars WHERE 'price' = 3"));
+        assertQueriesEquals(equal(Car.PRICE, -3.0), parser.query("SELECT * FROM cars WHERE 'price' = -3"));
+        assertQueriesEquals(equal(Car.PRICE, 3.1), parser.query("SELECT * FROM cars WHERE 'price' = 3.1"));
+        assertQueriesEquals(equal(Car.PRICE, 3.1), parser.query("SELECT * FROM cars WHERE 'price' = +3.1"));
+        assertQueriesEquals(equal(Car.PRICE, -3.1), parser.query("SELECT * FROM cars WHERE 'price' = -3.1"));
+        assertQueriesEquals(equal(Car.MODEL, "Sam's car"), parser.query("SELECT * FROM cars WHERE 'model' = 'Sam''s car'"));
+        assertQueriesEquals(isPrefixOf(Car.MANUFACTURER, "Ford"), parser.query("SELECT * from cars WHERE 'Ford' LIKE manufacturer || '%'"));
         assertQueriesEquals(
                 or(
                         and( // Cars less than 5K which have at least 4 doors

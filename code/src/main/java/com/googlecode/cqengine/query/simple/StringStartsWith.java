@@ -19,6 +19,8 @@ import com.googlecode.cqengine.attribute.Attribute;
 import com.googlecode.cqengine.attribute.SimpleAttribute;
 import com.googlecode.cqengine.query.option.QueryOptions;
 
+import static com.googlecode.cqengine.query.support.QueryValidation.checkQueryValueNotNull;
+
 /**
  * Asserts than a {@link CharSequence}-based attribute starts with a given {@link CharSequence}-based prefix.
 
@@ -26,7 +28,6 @@ import com.googlecode.cqengine.query.option.QueryOptions;
  */
 public class StringStartsWith<O, A extends CharSequence> extends SimpleQuery<O, A> {
 
-    private final Attribute<O, A> attribute;
     private final A value;
 
     /**
@@ -36,8 +37,7 @@ public class StringStartsWith<O, A extends CharSequence> extends SimpleQuery<O, 
      */
     public StringStartsWith(Attribute<O, A> attribute, A value) {
         super(attribute);
-        this.attribute = attribute;
-        this.value = value;
+        this.value = checkQueryValueNotNull(value);
     }
 
     public A getValue() {
@@ -47,13 +47,13 @@ public class StringStartsWith<O, A extends CharSequence> extends SimpleQuery<O, 
     @Override
     protected boolean matchesSimpleAttribute(SimpleAttribute<O, A> attribute, O object, QueryOptions queryOptions) {
         A attributeValue = attribute.getValue(object, queryOptions);
-        return matchesValue(attributeValue, queryOptions);
+        return matchesValue(attributeValue, value, queryOptions);
     }
 
     @Override
     protected boolean matchesNonSimpleAttribute(Attribute<O, A> attribute, O object, QueryOptions queryOptions) {
         for (A attributeValue : attribute.getValues(object, queryOptions)) {
-            if (matchesValue(attributeValue, queryOptions)) {
+            if (matchesValue(attributeValue, value, queryOptions)) {
                 return true;
             }
         }
@@ -61,15 +61,15 @@ public class StringStartsWith<O, A extends CharSequence> extends SimpleQuery<O, 
     }
 
     @SuppressWarnings("unused")
-    public boolean matchesValue(A aValue, QueryOptions queryOptions) {
+    public static boolean matchesValue(CharSequence aValue, CharSequence bValue, QueryOptions queryOptions) {
         int charsMatched = 0;
-        for (int i = 0, length = Math.min(aValue.length(), value.length()); i < length; i++) {
-            if (aValue.charAt(i) != value.charAt(i)) {
+        for (int i = 0, length = Math.min(aValue.length(), bValue.length()); i < length; i++) {
+            if (aValue.charAt(i) != bValue.charAt(i)) {
                 break;
             }
             charsMatched++;
         }
-        return charsMatched == value.length();
+        return charsMatched == bValue.length();
     }
 
 

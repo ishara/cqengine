@@ -15,6 +15,7 @@
  */
 package com.googlecode.cqengine.query.logical;
 
+import com.googlecode.cqengine.query.ComparativeQuery;
 import com.googlecode.cqengine.query.Query;
 import com.googlecode.cqengine.query.simple.SimpleQuery;
 
@@ -30,11 +31,13 @@ import java.util.*;
  */
 public abstract class LogicalQuery<O> implements Query<O> {
 
-    private final Collection<Query<O>> childQueries;
+    protected final Collection<Query<O>> childQueries;
     private final List<LogicalQuery<O>> logicalQueries = new ArrayList<LogicalQuery<O>>();
     private final List<SimpleQuery<O, ?>> simpleQueries = new ArrayList<SimpleQuery<O, ?>>();
+    private final List<ComparativeQuery<O, ?>> comparativeQueries = new ArrayList<ComparativeQuery<O, ?>>();
     private final boolean hasLogicalQueries;
     private final boolean hasSimpleQueries;
+    private final boolean hasComparativeQueries;
     private final int size;
     // Lazy calculate and cache hash code...
     private transient int cachedHashCode = 0;
@@ -45,6 +48,7 @@ public abstract class LogicalQuery<O> implements Query<O> {
      * @param childQueries The child queries which this {@code LogicalQuery} is to logically connect
      */
     public LogicalQuery(Collection<Query<O>> childQueries) {
+        Objects.requireNonNull(childQueries, "The child queries supplied to a logical query cannot be null");
         for (Query<O> query : childQueries) {
             if (query instanceof LogicalQuery) {
                 logicalQueries.add((LogicalQuery<O>) query);
@@ -52,12 +56,16 @@ public abstract class LogicalQuery<O> implements Query<O> {
             else if (query instanceof SimpleQuery) {
                 simpleQueries.add((SimpleQuery<O, ?>) query);
             }
+            else if (query instanceof ComparativeQuery) {
+                comparativeQueries.add((ComparativeQuery<O, ?>) query);
+            }
             else {
                 throw new IllegalStateException("Unexpected type of query: " + (query == null ? null : query + ", " + query.getClass()));
             }
         }
         this.hasLogicalQueries = !logicalQueries.isEmpty();
         this.hasSimpleQueries = !simpleQueries.isEmpty();
+        this.hasComparativeQueries = !comparativeQueries.isEmpty();
         this.size = childQueries.size();
         this.childQueries = childQueries;
     }
@@ -76,6 +84,14 @@ public abstract class LogicalQuery<O> implements Query<O> {
      */
     public List<SimpleQuery<O, ?>> getSimpleQueries() {
         return simpleQueries;
+    }
+
+    /**
+     * Returns a collection of child queries which are themselves {@link ComparativeQuery}s.
+     * @return a collection of child queries which are themselves {@link ComparativeQuery}s
+     */
+    public List<ComparativeQuery<O, ?>> getComparativeQueries() {
+        return comparativeQueries;
     }
 
     /**
@@ -102,6 +118,15 @@ public abstract class LogicalQuery<O> implements Query<O> {
      */
     public boolean hasSimpleQueries() {
         return hasSimpleQueries;
+    }
+
+    /**
+     * Returns true if this logical query has child queries which are themselves {@link ComparativeQuery}s.
+     * @return true if this logical query has child queries which are themselves {@link ComparativeQuery}s,
+     * false if this logical query has no child queries which are themselves {@link ComparativeQuery}s
+     */
+    public boolean hasComparativeQueries() {
+        return hasComparativeQueries;
     }
 
     /**

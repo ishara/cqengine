@@ -19,6 +19,8 @@ import com.googlecode.cqengine.attribute.Attribute;
 import com.googlecode.cqengine.attribute.SimpleAttribute;
 import com.googlecode.cqengine.query.option.QueryOptions;
 
+import static com.googlecode.cqengine.query.support.QueryValidation.checkQueryValueNotNull;
+
 /**
  * Asserts than an attribute is less than an upper bound.
  *
@@ -26,14 +28,12 @@ import com.googlecode.cqengine.query.option.QueryOptions;
  */
 public class LessThan<O, A extends Comparable<A>> extends SimpleQuery<O, A> {
 
-    private final Attribute<O, A> attribute;
     private final A value;
     private final boolean valueInclusive;
 
     public LessThan(Attribute<O, A> attribute, A value, boolean valueInclusive) {
         super(attribute);
-        this.attribute = attribute;
-        this.value = value;
+        this.value = checkQueryValueNotNull(value);
         this.valueInclusive = valueInclusive;
     }
 

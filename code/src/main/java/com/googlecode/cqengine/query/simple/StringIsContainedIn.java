@@ -19,6 +19,8 @@ import com.googlecode.cqengine.attribute.Attribute;
 import com.googlecode.cqengine.attribute.SimpleAttribute;
 import com.googlecode.cqengine.query.option.QueryOptions;
 
+import static com.googlecode.cqengine.query.support.QueryValidation.checkQueryValueNotNull;
+
 /**
  * Asserts than a {@link CharSequence}-based attribute is contained in a given {@link CharSequence}-based document.
 
@@ -26,7 +28,6 @@ import com.googlecode.cqengine.query.option.QueryOptions;
  */
 public class StringIsContainedIn<O, A extends CharSequence> extends SimpleQuery<O, A> {
 
-    private final Attribute<O, A> attribute;
     private final A value;
 
     /**
@@ -36,8 +37,7 @@ public class StringIsContainedIn<O, A extends CharSequence> extends SimpleQuery<
      */
     public StringIsContainedIn(Attribute<O, A> attribute, A value) {
         super(attribute);
-        this.attribute = attribute;
-        this.value = value;
+        this.value = checkQueryValueNotNull(value);
     }
 
     public A getValue() {

@@ -20,6 +20,9 @@ import com.googlecode.cqengine.attribute.*;
 import com.googlecode.cqengine.attribute.support.*;
 import com.googlecode.cqengine.entity.MapEntity;
 import com.googlecode.cqengine.entity.PrimaryKeyedMapEntity;
+import com.googlecode.cqengine.query.comparative.LongestPrefix;
+import com.googlecode.cqengine.query.comparative.Max;
+import com.googlecode.cqengine.query.comparative.Min;
 import com.googlecode.cqengine.query.logical.And;
 import com.googlecode.cqengine.query.logical.Not;
 import com.googlecode.cqengine.query.logical.Or;
@@ -28,6 +31,7 @@ import com.googlecode.cqengine.query.simple.*;
 import net.jodah.typetools.TypeResolver;
 
 import java.util.*;
+import java.util.function.Predicate;
 import java.util.regex.Pattern;
 
 /**
@@ -211,7 +215,56 @@ public class QueryFactory {
     public static <O, A extends CharSequence> StringStartsWith<O, A> startsWith(Attribute<O, A> attribute, A attributeValue) {
         return new StringStartsWith<O, A>(attribute, attributeValue);
     }
+    
+    /**
+     * Creates a {@link LongestPrefix} query which finds the object with the longest matching prefix.
+     * 
+     * @param attribute The attribute to which the query refers
+     * @param attributeValue The value to be asserted by the query
+     * @param <A> The type of the attribute
+     * @param <O> The type of the object containing the attribute
+     * @return A {@link LongestPrefix} query
+     */
+    public static <O, A extends CharSequence> LongestPrefix<O, A> longestPrefix(Attribute<O, A> attribute, A attributeValue) {
+        return new LongestPrefix<>(attribute, attributeValue);
+    }
 
+    /**
+     * Creates a {@link Min} query which finds the object(s) which have the minimum value of the given attribute.
+     *
+     * @param attribute The attribute to which the query refers
+     * @param <A> The type of the attribute
+     * @param <O> The type of the object containing the attribute
+     * @return A {@link Min} query
+     */
+    public static <O, A extends Comparable<A>> Min<O, A> min(Attribute<O, A> attribute) {
+        return new Min<>(attribute);
+    }
+
+    /**
+     * Creates a {@link Max} query which finds the object(s) which have the maximum value of the given attribute.
+     *
+     * @param attribute The attribute to which the query refers
+     * @param <A> The type of the attribute
+     * @param <O> The type of the object containing the attribute
+     * @return A {@link Max} query
+     */
+    public static <O, A extends Comparable<A>> Max<O, A> max(Attribute<O, A> attribute) {
+        return new Max<>(attribute);
+    }
+
+    /**
+     * Creates a {@link StringIsPrefixOf} query which finds all attributes that are prefixes of a certain string
+     * 
+     * @param attribute The attribute to which the query refers
+     * @param attributeValue The value to be asserted by the query
+     * @param <A> The type of the attribute
+     * @param <O> The type of the object containing the attribute
+     * @return An {@link StringIsPrefixOf} query
+     */
+    public static <O, A extends CharSequence> StringIsPrefixOf<O, A> isPrefixOf(Attribute<O, A> attribute, A attributeValue) {
+        return new StringIsPrefixOf<>(attribute, attributeValue);
+    }
     /**
      * Creates a {@link StringEndsWith} query which asserts that an attribute ends with a certain string fragment.
      *
@@ -1285,6 +1338,34 @@ public class QueryFactory {
         List<AttributeOrder<O>> attributeOrders = Arrays.asList(attributeOrder1, attributeOrder2, attributeOrder3,
                 attributeOrder4, attributeOrder5);
         return new OrderByOption<O>(attributeOrders);
+    }
+
+    /**
+     * Converts a {@link Query} to a {@link Predicate} which can evaluate if the the query matches any given object.
+     * The predicate will determine this by invoking {@link Query#matches(Object, QueryOptions)}, supplying null for
+     * the query options.
+     * <p/>
+     * Note that while most queries do not utilize query options and thus will be compatible with this method,
+     * it's possible that some queries might require query options. For those cases, create the predicate via
+     * the counterpart method {@link #predicate(Query, QueryOptions)} instead.
+     *
+     * @param query The query to be converted to a predicate
+     * @return A predicate which can evaluate if the the query matches any given object
+     */
+    public static <O> Predicate<O> predicate(Query<O> query) {
+        return predicate(query, null);
+    }
+
+    /**
+     * Converts a {@link Query} to a {@link Predicate} which can evaluate if the the query matches any given object.
+     * The predicate will determine this by invoking {@link Query#matches(Object, QueryOptions)}.
+     *
+     * @param query The query to be converted to a predicate
+     * @param queryOptions The query options to supply to the {@link Query#matches(Object, QueryOptions)} method
+     * @return A predicate which can evaluate if the the query matches any given object
+     */
+    public static <O> Predicate<O> predicate(Query<O> query, QueryOptions queryOptions) {
+        return object -> query.matches(object, queryOptions);
     }
 
     // ***************************************************************************************************************
