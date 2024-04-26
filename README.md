@@ -1,6 +1,6 @@
 [![Build Status](https://travis-ci.org/npgall/cqengine.svg?branch=master)](https://travis-ci.org/npgall/cqengine)
-[![Maven Central](https://img.shields.io/maven-metadata/v/http/central.maven.org/maven2/com/googlecode/cqengine/cqengine/maven-metadata.xml.svg?maxAge=86400
-)](http://search.maven.org/#search%7Cga%7C1%7Cg%3A%22com.googlecode.cqengine%22%20AND%20a%3Acqengine)
+[![Maven Central](https://maven-badges.herokuapp.com/maven-central/com.googlecode.cqengine/cqengine/badge.svg)](http://search.maven.org/#search%7Cga%7C1%7Cg%3A%22com.googlecode.cqengine%22%20AND%20a%3Acqengine)
+
 
 
 # CQEngine - Collection Query Engine #
@@ -554,10 +554,8 @@ The [MetadataEngine](http://htmlpreview.github.io/?http://raw.githubusercontent.
 
 It provides access to the following:
   * Frequency distributions (the counts of each attribute value stored in an index)
-  * Distinct keys (the distinct attribute values in an index)
-  * Distinct keys within a range (the distinct attribute values in an index, between x and y)
-  * Streams of attribute values and associated objects stored in an index (ascending/descending order)
-  * Streams of attribute values and associated objects stored in an index, between attribute values x and y
+  * Distinct keys (the distinct attribute values in an index, optionally within a range between x and y)
+  * Streams of attribute values and associated objects stored in an index (ascending/descending order, optionally within a range between x and y)
   * Count of distinct keys (how many distinct attribute values are in an index)
   * Count for a specific key (how many objects match a specific attribute value)
 
@@ -611,7 +609,7 @@ CQEngine should generally be compatible with other JVM languages besides Java to
 
 ## Project Status ##
 
-  * CQEngine 3.5.0 is the current release as of writing (March 2020), and is in Maven central
+  * CQEngine 3.6.0 is the current release as of writing (January 2021), and is in Maven central
   * A [ReleaseNotes](documentation/ReleaseNotes.md) page has been added to document changes between releases
   * API / JavaDocs are available [here](http://htmlpreview.github.io/?http://raw.githubusercontent.com/npgall/cqengine/master/documentation/javadoc/apidocs/index.html)
 
